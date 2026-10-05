@@ -1,1 +1,2 @@
-###Django Application
+#Django Application
+![](docs/screenshot.png)
