@@ -1,0 +1,62 @@
+{% extends "admin/index.html" %}
+{% load unfold %}
+
+{% block content %}
+<div class="flex flex-col gap-6">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {% component "unfold/components/card.html" with title="Total Users" value=kpi_users icon="people" %}{% endcomponent %}
+        {% component "unfold/components/card.html" with title="Published Posts" value=kpi_published icon="check_circle" %}{% endcomponent %}
+        {% component "unfold/components/card.html" with title="Draft Posts" value=kpi_drafts icon="drafts" %}{% endcomponent %}
+        {% component "unfold/components/card.html" with title="Total Comments" value=kpi_comments icon="comment" %}{% endcomponent %}
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow flex flex-col gap-4">
+        <h3 class="text-base font-semibold text-gray-900 dark:text-gray-100">Post Status Distribution</h3>
+        <div>
+            <div class="flex justify-between text-sm mb-1">
+                <span>Published Posts</span>
+                <span>{{ published_share }}%</span>
+            </div>
+            {% component "unfold/components/progress.html" with value=published_share color="success" %}{% endcomponent %}
+        </div>
+        <div>
+            <div class="flex justify-between text-sm mb-1">
+                <span>Draft Posts</span>
+                <span>{{ draft_share }}%</span>
+            </div>
+            {% component "unfold/components/progress.html" with value=draft_share color="warning" %}{% endcomponent %}
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+            <h3 class="text-base font-semibold mb-4 text-gray-900 dark:text-gray-100">Posts per Category</h3>
+            {% component "unfold/components/chart/bar.html" with data=chart_data_json %}{% endcomponent %}
+        </div>
+
+        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+            <h3 class="text-base font-semibold mb-4 text-gray-900 dark:text-gray-100">Top 5 Authors</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm text-gray-500 dark:text-gray-400">
+                    <thead class="bg-gray-50 dark:bg-gray-700 text-xs text-gray-700 dark:text-gray-300 uppercase">
+                        <tr>
+                            <th scope="col" class="px-4 py-3">Author</th>
+                            <th scope="col" class="px-4 py-3">Email</th>
+                            <th scope="col" class="px-4 py-3 text-right">Posts</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for author in top_authors %}
+                        <tr class="border-b dark:border-gray-700">
+                            <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">{{ author.name }}</td>
+                            <td class="px-4 py-3">{{ author.email }}</td>
+                            <td class="px-4 py-3 text-right font-bold">{{ author.posts }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
