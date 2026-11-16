@@ -1,12 +1,12 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import random
 from typing import Any
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
 from django.core.management.base import BaseCommand, CommandError, CommandParser
+from django.utils import timezone
 from django.utils.text import slugify
-
 from faker import Faker
 
 from apps.blog.models import Category, Comment, Post, Tag
@@ -21,8 +21,12 @@ class Command(BaseCommand):
     DEFAULT_POSTS = 100
     DEFAULT_COMMENTS = 500
     DEFAULT_PASSWORD = "password123"
+    DAYS_IN_YEAR = 365
+    EDITED_POST_RATIO = 0.3
+    MIN_EDIT_DAYS = 1
+    MAX_EDIT_DAYS = 30
 
-    CATEGORIES = [
+    CATEGORIES = (
         "Python",
         "Django",
         "DevOps",
@@ -31,38 +35,30 @@ class Command(BaseCommand):
         "Backend",
         "DataBase",
         "Machine",
-    ]
+    )
 
-    TAGS = [
-        # Python
+    TAGS = (
         "asyncio",
         "pytest",
-        # Django
         "Django REST Framework",
         "Django ORM",
-        # DevOps
         "Docker",
         "Kubernetes",
         "CI/CD Pipelines",
-        # C++
         "Standard Template Library (STL)",
         "Smart Pointers",
-        # Frontend
         "React.js",
         "Tailwind CSS",
         "TypeScript",
-        # Backend
         "REST API Design",
         "GraphQL",
         "WebSockets",
-        # DataBase
         "PostgreSQL",
         "Redis Caching",
         "MongoDB",
-        # Machine
         "Scikit-Learn",
         "PyTorch",
-    ]
+    )
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
@@ -97,16 +93,18 @@ class Command(BaseCommand):
         User.objects.filter(is_superuser=False).delete()
 
     def __create_categories_and_tags(self) -> tuple[list[Category], list[Tag]]:
-        existing_categories = set(Category.objects.values_list("name", flat=True))
-        new_categories = [
+        existing_categories: set[str] = set(
+            Category.objects.values_list("name", flat=True)
+        )
+        new_categories: list[Category] = [
             Category(name=name, slug=slugify(name))
             for name in self.CATEGORIES
             if name not in existing_categories
         ]
         Category.objects.bulk_create(new_categories)
 
-        existing_tags = set(Tag.objects.values_list("name", flat=True))
-        new_tags = [
+        existing_tags: set[str] = set(Tag.objects.values_list("name", flat=True))
+        new_tags: list[Tag] = [
             Tag(name=name, slug=slugify(name))
             for name in self.TAGS
             if name not in existing_tags
@@ -116,23 +114,23 @@ class Command(BaseCommand):
         return list(Category.objects.all()), list(Tag.objects.all())
 
     def __create_users(self, count: int, fake: Faker) -> int:
-        hashed_password = make_password(self.DEFAULT_PASSWORD)
-        existing_emails = set(User.objects.values_list("email", flat=True))
+        hashed_password: str = make_password(self.DEFAULT_PASSWORD)
+        existing_emails: set[str] = set(User.objects.values_list("email", flat=True))
         users_to_create: list[User] = []
 
-        for _ in range(count):
-            first_name = fake.first_name()
-            last_name = fake.last_name()
-            email = f"{first_name.lower()}.{last_name.lower()}@gmail.com"
+        i: int
+        for i in range(count):
+            first_name: str = fake.first_name()
+            last_name: str = fake.last_name()
+            email: str = f"{first_name.lower()}.{last_name.lower()}@gmail.com"
 
-            suffix = 1
+            suffix: int = 1
             while email in existing_emails:
                 email = f"{first_name.lower()}.{last_name.lower()}{suffix}@gmail.com"
                 suffix += 1
             existing_emails.add(email)
 
-            # Проверяем наличие поля username у модели пользователя
-            user_kwargs = {
+            user_kwargs: dict[str, Any] = {
                 "first_name": first_name,
                 "last_name": last_name,
                 "email": email,
@@ -147,8 +145,6 @@ class Command(BaseCommand):
 
         User.objects.bulk_create(users_to_create)
         return len(users_to_create)
-        User.objects.bulk_create(users_to_create)
-        return len(users_to_create)
 
     def __create_posts(
         self,
@@ -158,66 +154,76 @@ class Command(BaseCommand):
         tags: list[Tag],
         fake: Faker,
     ) -> list[Post]:
-        used_slug = set(Post.objects.values_list("slug", flat=True))
+        used_slugs: set[str] = set(Post.objects.values_list("slug", flat=True))
         posts_to_create: list[Post] = []
         created_slugs: list[str] = []
 
-        for _ in range(count):
-            title = fake.sentence().rstrip(".")
-            base_slug = slugify(title)
-            slug = base_slug
+        i: int
+        for i in range(count):
+            title: str = fake.sentence().rstrip(".")
+            base_slug: str = slugify(title)
+            slug: str = base_slug
 
-            suffix = 2
-            while slug in used_slug:
+            suffix: int = 2
+            while slug in used_slugs:
                 slug = f"{base_slug}-{suffix}"
                 suffix += 1
-            used_slug.add(slug)
+            used_slugs.add(slug)
             created_slugs.append(slug)
 
-            author = random.choice(users)
-            content_text = "\n\n".join(fake.paragraphs(nb=3))
-            status = "published" if random.random() < 0.7 else "draft"
-            category = (
+            author: User = random.choice(users)
+            body_text: str = "\n\n".join(fake.paragraphs(nb=3))
+            status: str = (
+                Post.StatusChoices.PUBLISHED
+                if random.random() < 0.7
+                else Post.StatusChoices.DRAFT
+            )
+            category: Category | None = (
                 random.choice(categories)
                 if random.random() > 0.1 and categories
                 else None
             )
 
-            post_kwargs = {
-                "title": title,
-                "slug": slug,
-                "category": category,
-            }
-            
-            # Accommodate author/user field variations
-            if hasattr(Post, "author"):
-                post_kwargs["author"] = author
-            elif hasattr(Post, "user"):
-                post_kwargs["user"] = author
-
-            # Accommodate content/body field variations
-            if hasattr(Post, "content"):
-                post_kwargs["content"] = content_text
-            elif hasattr(Post, "body"):
-                post_kwargs["body"] = content_text
-
-            # Accommodate status field variations
-            if hasattr(Post, "status"):
-                post_kwargs["status"] = status
-
-            posts_to_create.append(Post(**post_kwargs))
+            posts_to_create.append(
+                Post(
+                    author=author,
+                    title=title,
+                    slug=slug,
+                    body=body_text,
+                    category=category,
+                    status=status,
+                )
+            )
 
         Post.objects.bulk_create(posts_to_create)
+        saved_posts: list[Post] = list(Post.objects.filter(slug__in=created_slugs))
 
-        # Retrieve saved instances from DB to get primary keys for ManyToMany relationship
-        saved_posts = list(Post.objects.filter(slug__in=created_slugs))
+        now: datetime = timezone.now()
+        year_seconds: int = int(timedelta(days=self.DAYS_IN_YEAR).total_seconds())
+
+        post: Post
+        for post in saved_posts:
+            random_offset: int = random.randint(0, year_seconds)
+            created_at: datetime = now - timedelta(seconds=random_offset)
+            post.created_at = created_at
+
+            if random.random() < self.EDITED_POST_RATIO:
+                edit_days: int = random.randint(
+                    self.MIN_EDIT_DAYS, self.MAX_EDIT_DAYS
+                )
+                edited_at: datetime = created_at + timedelta(days=edit_days)
+                post.updated_at = edited_at if edited_at <= now else now
+            else:
+                post.updated_at = created_at
+
+        if saved_posts:
+            Post.objects.bulk_update(saved_posts, ["created_at", "updated_at"])
 
         if tags and saved_posts:
             for post in saved_posts:
-                if hasattr(post, "tags"):
-                    tag_count = random.randint(0, min(5, len(tags)))
-                    if tag_count > 0:
-                        post.tags.set(random.sample(tags, tag_count))
+                tag_count: int = random.randint(0, min(5, len(tags)))
+                if tag_count > 0:
+                    post.tags.set(random.sample(tags, tag_count))
 
         return saved_posts
 
@@ -229,33 +235,43 @@ class Command(BaseCommand):
         fake: Faker,
     ) -> int:
         comments_to_create: list[Comment] = []
-        for _ in range(count):
-            author = random.choice(users)
-            post = random.choice(published_posts)
-            comment_text = " ".join(fake.sentences(nb=random.randint(1, 3)))
-            
-            comment_kwargs = {"post": post}
-            
-            if hasattr(Comment, "author"):
-                comment_kwargs["author"] = author
-            elif hasattr(Comment, "user"):
-                comment_kwargs["user"] = author
-            elif hasattr(Comment, "author_name"):
-                comment_kwargs["author_name"] = author.get_full_name() or author.username
+        now: datetime = timezone.now()
 
-            if hasattr(Comment, "content"):
-                comment_kwargs["content"] = comment_text
-            elif hasattr(Comment, "body"):
-                comment_kwargs["body"] = comment_text
+        i: int
+        for i in range(count):
+            author: User = random.choice(users)
+            post: Post = random.choice(published_posts)
+            body_text: str = " ".join(fake.sentences(nb=random.randint(1, 3)))
+            comments_to_create.append(
+                Comment(
+                    post=post,
+                    author=author,
+                    body=body_text,
+                )
+            )
 
-            comments_to_create.append(Comment(**comment_kwargs))
+        created_comments: list[Comment] = Comment.objects.bulk_create(
+            comments_to_create
+        )
 
-        Comment.objects.bulk_create(comments_to_create)
-        return len(comments_to_create)
+        comment: Comment
+        for comment in created_comments:
+            max_seconds: int = max(
+                0, int((now - comment.post.created_at).total_seconds())
+            )
+            offset_seconds: int = random.randint(0, max_seconds)
+            comment.created_at = comment.post.created_at + timedelta(
+                seconds=offset_seconds
+            )
+
+        if created_comments:
+            Comment.objects.bulk_update(created_comments, ["created_at"])
+
+        return len(created_comments)
 
     def handle(self, *args: tuple[Any, ...], **options: dict[str, Any]) -> None:
         start_time: datetime = datetime.now()
-        fake = Faker()
+        fake: Faker = Faker()
 
         users_count: int = options["users"]
         posts_count: int = options["posts"]
@@ -268,30 +284,53 @@ class Command(BaseCommand):
         if clear:
             self.__clear_data()
 
+        categories: list[Category]
+        tags: list[Tag]
         categories, tags = self.__create_categories_and_tags()
-        created_users_cnt = self.__create_users(users_count, fake)
-        all_users = list(User.objects.filter(is_superuser=False))
+
+        created_users_cnt: int = self.__create_users(users_count, fake)
+        all_users: list[User] = list(User.objects.filter(is_superuser=False))
 
         if posts_count > 0 and not all_users:
             raise CommandError("There are no users")
 
-        created_posts = self.__create_posts(posts_count, all_users, categories, tags, fake)
-        
-        if hasattr(Post, "status"):
-            published_posts = list(Post.objects.filter(status="published"))
-        else:
-            published_posts = created_posts
+        created_posts: list[Post] = self.__create_posts(
+            posts_count, all_users, categories, tags, fake
+        )
+        published_posts: list[Post] = [
+            post
+            for post in created_posts
+            if post.status == Post.StatusChoices.PUBLISHED
+        ]
+        if not published_posts:
+            published_posts = list(
+                Post.objects.filter(status=Post.StatusChoices.PUBLISHED)
+            )
 
         if comments_count > 0 and not published_posts:
-            raise CommandError("Comments were requested but no published posts exist.")
+            raise CommandError(
+                "Comments were requested but no published posts exist."
+            )
 
-        created_comments_cnt = self.__create_comments(comments_count, all_users, published_posts, fake)
+        created_comments_cnt: int = self.__create_comments(
+            comments_count, all_users, published_posts, fake
+        )
 
-        time_spent = (datetime.now() - start_time).total_seconds()
+        time_spent: float = (datetime.now() - start_time).total_seconds()
 
-        self.stdout.write(self.style.SUCCESS(f"Users:      {created_users_cnt:>5} created"))
-        self.stdout.write(self.style.SUCCESS(f"Categories: {len(self.CATEGORIES):>5} created"))
-        self.stdout.write(self.style.SUCCESS(f"Tags:       {len(self.TAGS):>5} created"))
-        self.stdout.write(self.style.SUCCESS(f"Posts:      {len(created_posts):>5} created"))
-        self.stdout.write(self.style.SUCCESS(f"Comments:   {created_comments_cnt:>5} created"))
+        self.stdout.write(
+            self.style.SUCCESS(f"Users: {created_users_cnt:>5} created")
+        )
+        self.stdout.write(
+            self.style.SUCCESS(f"Categories: {len(self.CATEGORIES):>5} created")
+        )
+        self.stdout.write(
+            self.style.SUCCESS(f"Tags: {len(self.TAGS):>5} created")
+        )
+        self.stdout.write(
+            self.style.SUCCESS(f"Posts: {len(created_posts):>5} created")
+        )
+        self.stdout.write(
+            self.style.SUCCESS(f"Comments: {created_comments_cnt:>5} created")
+        )
         self.stdout.write(self.style.SUCCESS(f"Done in {time_spent:.2f} seconds"))
